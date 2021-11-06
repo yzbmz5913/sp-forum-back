@@ -51,3 +51,9 @@ type Reply struct {
 	ToAuthor Author `json:"to_author"`
 	Author   Author `json:"author"`
 }
+
+type Hot struct {
+	Tid   int    `json:"tid,omitempty"`
+	Title string `json:"title,omitempty"`
+	Date  string `json:"date,omitempty"`
+}

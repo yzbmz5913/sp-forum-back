@@ -8,6 +8,7 @@ import (
 type services struct {
 	Us *UserService
 	Ts *ThreadService
+	Hs *HomeService
 }
 
 var s *services

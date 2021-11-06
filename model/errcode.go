@@ -23,5 +23,6 @@ var UserNotExist = &E{1006, "用户不存在"}
 var PwdNotMatch = &E{1007, "两次输入的密码不匹配"}
 var DescTooLong = &E{1008, "简介不能超过110字"}
 var OldPwdWrong = &E{1009, "旧密码输入错误"}
+var NoAuth = &E{1010, "没有权限"}
 
 var ThreadNotExist = &E{2001, "帖子不存在"}

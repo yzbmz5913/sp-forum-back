@@ -201,19 +201,17 @@ func (us *UserService) getUserByUid(uid int) (*model.UserDetail, error) {
 	return &ud, nil
 }
 
-//follow positive=1关注 positive=0取关
-func (us *UserService) follow(c *gin.Context, targetUid, positive int) *ec.E {
+//follow positive=true关注 positive=false取关
+func (us *UserService) follow(c *gin.Context, targetUid int, positive bool) *ec.E {
 	get, _ := c.Get("uid")
 	uid := get.(int)
 	var err error
-	if positive == 1 {
+	if positive {
 		sqlStr := "insert into sp_forum.following(uid1,uid2) value(?,?)"
 		_, err = da.Db.Exec(sqlStr, uid, targetUid)
-	} else if positive == 0 {
+	} else {
 		sqlStr := "delete from sp_forum.following where uid1=? and uid2=?"
 		_, err = da.Db.Exec(sqlStr, uid, targetUid)
-	} else {
-		return ec.ParamsErr
 	}
 	if err != nil {
 		return ec.MysqlErr

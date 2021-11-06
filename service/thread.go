@@ -3,8 +3,10 @@ package service
 import (
 	"database/sql"
 	"fmt"
+	"github.com/garyburd/redigo/redis"
 	"github.com/gin-gonic/gin"
 	"log"
+	"math"
 	"sp-forum-back/da"
 	"sp-forum-back/model"
 	ec "sp-forum-back/model"
@@ -221,7 +223,17 @@ func (ts *ThreadService) CreateReply(c *gin.Context, lid int, content string, to
 	}, nil
 }
 
-func (ts *ThreadService) DelReply(_ *gin.Context, rid int) *ec.E {
+func (ts *ThreadService) DelReply(c *gin.Context, rid int) *ec.E {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	row := da.Db.QueryRow("select author from sp_forum.reply where rid=?", rid)
+	var author int
+	if err := row.Scan(&author); err != nil {
+		return ec.MysqlErr
+	}
+	if author != uid {
+		return ec.NoAuth
+	}
 	sqlStr := "delete from sp_forum.reply where rid=?"
 	_, err := da.Db.Exec(sqlStr, rid)
 	if err != nil {
@@ -230,7 +242,18 @@ func (ts *ThreadService) DelReply(_ *gin.Context, rid int) *ec.E {
 	return nil
 }
 
-func (ts *ThreadService) DelLevel(_ *gin.Context, lid int) *ec.E {
+func (ts *ThreadService) DelLevel(c *gin.Context, lid int) *ec.E {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	row := da.Db.QueryRow("select author from sp_forum.level where lid=?", lid)
+	var author int
+	if err := row.Scan(&author); err != nil {
+		return ec.MysqlErr
+	}
+	if author != uid {
+		return ec.NoAuth
+	}
+
 	tx, err := da.Db.Begin()
 	if err != nil {
 		log.Printf("begin trx error:%v", err)
@@ -258,6 +281,20 @@ func (ts *ThreadService) DelLevel(_ *gin.Context, lid int) *ec.E {
 }
 
 func (ts *ThreadService) DelThread(c *gin.Context, tid int) *ec.E {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	row := da.Db.QueryRow("select author from sp_forum.thread where tid=?", tid)
+	var author int
+	if err := row.Scan(&author); err != nil {
+		return ec.MysqlErr
+	}
+	if author != uid {
+		return ec.NoAuth
+	}
+	conn := da.OpenRedis()
+	defer conn.Close()
+	conn.Do("zrem", "thread:rank", tid)
+	_, _ = conn.Do("zrem", "thread:liked", tid)
 	thread, e := ts.GetThread(c, tid)
 	if e != nil {
 		return e
@@ -301,14 +338,98 @@ func (ts *ThreadService) DelThread(c *gin.Context, tid int) *ec.E {
 	return nil
 }
 
-func (ts *ThreadService) isFav(c *gin.Context, lid, rid int) *ec.E {
-	panic("implement me")
+func (ts *ThreadService) IsFav(c *gin.Context, lid int) (bool, *ec.E) {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	conn := da.OpenRedis()
+	defer conn.Close()
+	res, err := redis.Bool(conn.Do("exists", "user:like:"+strconv.Itoa(uid)+":"+strconv.Itoa(lid)))
+	if err != nil {
+		return false, ec.RedisErr
+	}
+	return res, nil
 }
 
-func (ts *ThreadService) Fav(c *gin.Context, lid, rid int) *ec.E {
-	panic("implement me")
+func (ts *ThreadService) Fav(c *gin.Context, tid, lid int, positive bool) *ec.E {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	conn := da.OpenRedis()
+	defer conn.Close()
+	var err error
+	now := time.Now().Format("2006-01-02")
+	isFav, e := ts.IsFav(c, lid)
+	if e != nil {
+		return e
+	}
+	if positive && !isFav {
+		_ = conn.Send("multi")
+		_ = conn.Send("set", "user:like:"+strconv.Itoa(uid)+":"+strconv.Itoa(lid), now)
+		_ = conn.Send("zincrby", "thread:liked", 1, tid)
+		_ = conn.Send("zincrby", "thread:rank", 1, tid)
+		if _, err = conn.Do("exec"); err != nil {
+			log.Printf("redis trx error:%v", err)
+			return ec.RedisErr
+		}
+	} else if !positive && isFav {
+		favDate, _ := redis.String(conn.Do("get", "user:like:"+strconv.Itoa(uid)+":"+strconv.Itoa(lid)))
+		_, _ = conn.Do("zincrby", "thread:liked", -1, tid)
+		favTime, _ := time.Parse("2006-01-02", favDate)
+		diff := (time.Now().Unix() - favTime.Unix()) / 86400
+		score, _ := redis.Float64(conn.Do("zincrby", "thread:rank", -math.Pow(0.75, float64(diff)), tid))
+		if score <= 0 {
+			_, _ = conn.Do("zrem", "level:rank", lid)
+		}
+		_, _ = conn.Do("del", "user:like:"+strconv.Itoa(uid)+":"+strconv.Itoa(lid))
+	} else {
+		return ec.ParamsErr
+	}
+	return nil
 }
 
-func (ts *ThreadService) Collect(c *gin.Context, tid int) *ec.E {
-	panic("implement me")
+func (ts *ThreadService) FavNum(_ *gin.Context, lid int) (int, *ec.E) {
+	conn := da.OpenRedis()
+	defer conn.Close()
+	favNum, err := redis.Int(conn.Do("zscore", "level:liked", lid))
+	if err != nil {
+		return 0, ec.RedisErr
+	}
+	return favNum, nil
+}
+
+func (ts *ThreadService) IsCollect(c *gin.Context, tid int) (bool, *ec.E) {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	row := da.Db.QueryRow("select uid,tid from sp_forum.user_collect where uid=? and tid=?",
+		uid, tid)
+	var u, t int
+	err := row.Scan(&u, &t)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, ec.MysqlErr
+	}
+	return true, nil
+}
+
+func (ts *ThreadService) Collect(c *gin.Context, tid int, positive bool) *ec.E {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	isCollect, e := ts.IsCollect(c, tid)
+	if e != nil {
+		return e
+	}
+	var err error
+	if isCollect && !positive {
+		_, err = da.Db.Exec("delete from sp_forum.user_collect where uid=? and tid=?",
+			uid, tid)
+	} else if !isCollect && positive {
+		_, err = da.Db.Exec("insert into sp_forum.user_collect(uid,tid) value(?,?)",
+			uid, tid)
+	}
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return ec.MysqlErr
+	}
+	return nil
 }
