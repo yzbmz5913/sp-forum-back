@@ -14,24 +14,10 @@ import (
 	"time"
 )
 
-type threadService interface {
-	GetThread(c *gin.Context, tid int) (*model.Thread, *ec.E)
-	GetReply(c *gin.Context, lid int) ([]*model.Reply, *ec.E)
-	CreateLevel(c *gin.Context, tid int, content string) (*model.Level, *ec.E)
-	CreateThread(c *gin.Context, title string) (*model.Thread, *ec.E)
-	CreateReply(c *gin.Context, lid int, content string, to int) (*model.Reply, *ec.E)
-	DelReply(c *gin.Context, rid int) *ec.E
-	DelLevel(c *gin.Context, lid int) *ec.E
-	DelThread(c *gin.Context, tid int) *ec.E
-	Fav(c *gin.Context, lid, rid int) *ec.E
-	Collect(c *gin.Context, tid int) *ec.E
-}
-
 type ThreadService struct{}
 
-func (ts *ThreadService) GetThread(_ *gin.Context, tid int) (*model.Thread, *ec.E) {
+func (ts *ThreadService) GetThread(_ *gin.Context, tid, page int) (*model.Thread, *ec.E) {
 	t := &model.Thread{}
-
 	sqlStr := "select tid,title,`date`,fav,reply_num,last_modify,u.uid,u.username,u.face_url" +
 		" from thread t join user u on t.author=u.uid where tid=?"
 	row := da.Db.QueryRow(sqlStr, tid)
@@ -43,16 +29,15 @@ func (ts *ThreadService) GetThread(_ *gin.Context, tid int) (*model.Thread, *ec.
 		return nil, ec.MysqlErr
 	}
 	levels := make([]model.Level, 0)
-	sqlStr = "select lid,content,`date`,fav,u.uid,u.username,u.face_url" +
-		" from level l join user u on l.author=u.uid where l.thread=?"
-	rows, err := da.Db.Query(sqlStr, tid)
+	sqlStr = "select l.lid,content,`date`,fav,is_root,reply_num,u.uid,u.username,u.face_url from (select lid from level where thread=? limit ?,10) t join level l join user u on t.lid=l.lid and u.uid=l.author"
+	rows, err := da.Db.Query(sqlStr, tid, (page-1)*10)
 	if err != nil {
 		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
 	for rows.Next() {
 		l := model.Level{}
-		err = rows.Scan(&l.Lid, &l.Content, &l.Date, &l.Fav, &l.Author.Uid, &l.Author.Username, &l.Author.FaceUrl)
+		err = rows.Scan(&l.Lid, &l.Content, &l.Date, &l.Fav, &l.IsRoot, &l.ReplyNum, &l.Author.Uid, &l.Author.Username, &l.Author.FaceUrl)
 		if err != nil {
 			return nil, ec.MysqlErr
 		}
@@ -62,9 +47,19 @@ func (ts *ThreadService) GetThread(_ *gin.Context, tid int) (*model.Thread, *ec.
 	return t, nil
 }
 
+func (ts *ThreadService) LevelNum(_ *gin.Context, tid int) (int, *ec.E) {
+	row := da.Db.QueryRow("select count(1) from level where thread=?", tid)
+	var cnt int
+	err := row.Scan(&cnt)
+	if err != nil {
+		return 0, ec.MysqlErr
+	}
+	return cnt, nil
+}
+
 func (ts *ThreadService) GetReply(_ *gin.Context, lid int) ([]*model.Reply, *ec.E) {
 	replies := make([]*model.Reply, 0)
-	sqlStr := "select rid,content,`date`,fav,author,`to`" +
+	sqlStr := "select rid,content,`date`,author,`to`" +
 		" from reply where level=?"
 	rows, err := da.Db.Query(sqlStr, lid)
 	if err != nil {
@@ -74,7 +69,7 @@ func (ts *ThreadService) GetReply(_ *gin.Context, lid int) ([]*model.Reply, *ec.
 	for rows.Next() {
 		r := model.Reply{}
 		var a, to int
-		err = rows.Scan(&r.Rid, &r.Content, &r.Date, &r.Fav, &a, &to)
+		err = rows.Scan(&r.Rid, &r.Content, &r.Date, &a, &to)
 		if err != nil {
 			return nil, ec.MysqlErr
 		}
@@ -209,7 +204,6 @@ func (ts *ThreadService) CreateReply(c *gin.Context, lid int, content string, to
 		Rid:     int(rid),
 		Content: content,
 		Date:    now,
-		Fav:     0,
 		ToAuthor: model.Author{
 			Uid:      toAuthor.Uid,
 			Username: toAuthor.Username,
@@ -295,10 +289,7 @@ func (ts *ThreadService) DelThread(c *gin.Context, tid int) *ec.E {
 	defer conn.Close()
 	conn.Do("zrem", "thread:rank", tid)
 	_, _ = conn.Do("zrem", "thread:liked", tid)
-	thread, e := ts.GetThread(c, tid)
-	if e != nil {
-		return e
-	}
+
 	tx, err := da.Db.Begin()
 	if err != nil {
 		log.Printf("begin trx error:%v", err)
@@ -318,9 +309,16 @@ func (ts *ThreadService) DelThread(c *gin.Context, tid int) *ec.E {
 		_ = tx.Rollback()
 		return ec.MysqlErr
 	}
+	rows, err := da.Db.Query("select lid from level where thread=?", tid)
+	if err != nil {
+		return ec.MysqlErr
+	}
 	in := ""
-	for _, l := range thread.Levels {
-		in += strconv.Itoa(l.Lid) + ","
+	for rows.Next() {
+		var lid int
+		if err := rows.Scan(&lid); err == nil {
+			in += strconv.Itoa(lid) + ","
+		}
 	}
 	in = in[:len(in)-1]
 	sqlStr = "delete from sp_forum.reply where level in " +

@@ -24,5 +24,6 @@ var PwdNotMatch = &E{1007, "两次输入的密码不匹配"}
 var DescTooLong = &E{1008, "简介不能超过110字"}
 var OldPwdWrong = &E{1009, "旧密码输入错误"}
 var NoAuth = &E{1010, "没有权限"}
+var FollowSelf = &E{1011, "不能关注自己"}
 
 var ThreadNotExist = &E{2001, "帖子不存在"}

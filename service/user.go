@@ -18,16 +18,10 @@ import (
 )
 import ec "sp-forum-back/model"
 
-type userService interface {
-	Register(c *gin.Context, username, password string) (*model.UserDetail, *ec.E)
-	Login(c *gin.Context, username, password string) (*model.UserDetail, *ec.E)
-	ChangeProfile(c *gin.Context, req model.ChangeUserProfileReq) *ec.E
-}
-
 type UserService struct{}
 
 func (us *UserService) Register(c *gin.Context, username, password, password2 string) (*model.UserDetail, *ec.E) {
-	row := da.Db.QueryRow("select `username` from `user` where `username`=?", username)
+	row := da.Db.QueryRow("select `username` from sp_forum.user where `username`=?", username)
 	var un string
 	err := row.Scan(&un)
 	if err != nil {
@@ -128,7 +122,8 @@ func (us *UserService) ChangeProfile(c *gin.Context, req model.ChangeUserProfile
 		return ec.DescTooLong
 	}
 
-	sqlStr := "update `user` set `username`=?, `desc`=?, `face_url`=? %s where `uid`=?"
+	sqlStr := "update `user` set `username`=?, `desc`=?, `face_url`=? %s " +
+		"where `uid`=?"
 	args := make([]interface{}, 0, 4)
 	args = append(args, req.Username)
 	args = append(args, req.Desc)
@@ -196,19 +191,24 @@ func (us *UserService) getUserByUid(uid int) (*model.UserDetail, error) {
 	}
 	bytes, err := json.Marshal(ud)
 	if err == nil {
-		_ = conn.Send("set", "user_"+strconv.Itoa(uid), bytes)
+		_ = conn.Send("setex", "user_"+strconv.Itoa(uid), 86400, bytes)
 	}
 	return &ud, nil
 }
 
-//follow positive=true关注 positive=false取关
-func (us *UserService) follow(c *gin.Context, targetUid int, positive bool) *ec.E {
+//Follow positive=true关注 positive=false取关
+func (us *UserService) Follow(c *gin.Context, targetUid int, positive bool) *ec.E {
 	get, _ := c.Get("uid")
 	uid := get.(int)
+	if uid == targetUid {
+		return ec.FollowSelf
+	}
 	var err error
 	if positive {
 		sqlStr := "insert into sp_forum.following(uid1,uid2) value(?,?)"
 		_, err = da.Db.Exec(sqlStr, uid, targetUid)
+		_, _ = da.Db.Exec("insert into notification(uid,`from`,type,date) value(?,?,?,?)",
+			targetUid, uid, 1, time.Now().Format("2006-01-02 15:04:05"))
 	} else {
 		sqlStr := "delete from sp_forum.following where uid1=? and uid2=?"
 		_, err = da.Db.Exec(sqlStr, uid, targetUid)
@@ -219,7 +219,7 @@ func (us *UserService) follow(c *gin.Context, targetUid int, positive bool) *ec.
 	return nil
 }
 
-func (us *UserService) isFollow(c *gin.Context, targetUid int) (bool, *ec.E) {
+func (us *UserService) IsFollow(c *gin.Context, targetUid int) (bool, *ec.E) {
 	get, _ := c.Get("uid")
 	uid := get.(int)
 	sqlStr := "select uid1,uid2 from sp_forum.following where uid1=? and uid2=?"
@@ -233,4 +233,35 @@ func (us *UserService) isFollow(c *gin.Context, targetUid int) (bool, *ec.E) {
 		return false, ec.MysqlErr
 	}
 	return true, nil
+}
+
+func (us *UserService) Stats(c *gin.Context) (*model.UserStats, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	row := da.Db.QueryRow("select reg_date from user where uid=?", uid)
+	var regDate string
+	if err := row.Scan(&regDate); err != nil {
+		return nil, ec.MysqlErr
+	}
+	row = da.Db.QueryRow("select count(1) from thread where author=?", uid)
+	var threadNum int
+	if err := row.Scan(&threadNum); err != nil {
+		return nil, ec.MysqlErr
+	}
+	row = da.Db.QueryRow("select count(1) from following where uid1=?")
+	var followingNum int
+	if err := row.Scan(&followingNum); err != nil {
+		return nil, ec.MysqlErr
+	}
+	row = da.Db.QueryRow("select count(1) from following where uid2=?")
+	var followerNum int
+	if err := row.Scan(&followerNum); err != nil {
+		return nil, ec.MysqlErr
+	}
+	return &model.UserStats{
+		RegDate:      regDate,
+		ThreadNum:    threadNum,
+		FollowingNum: followingNum,
+		FollowerNum:  followerNum,
+	}, nil
 }

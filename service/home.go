@@ -13,7 +13,7 @@ import (
 
 type HomeService struct{}
 
-func (hs *HomeService) Hots(c *gin.Context) ([]*model.Hot, *ec.E) {
+func (hs *HomeService) Hots(_ *gin.Context) ([]*model.Hot, *ec.E) {
 	const hotNum = 6
 	conn := da.OpenRedis()
 	defer conn.Close()
@@ -66,4 +66,20 @@ func (hs *HomeService) Hots(c *gin.Context) ([]*model.Hot, *ec.E) {
 		}
 	}
 	return hots, nil
+}
+
+func (hs *HomeService) Carousel(_ *gin.Context) ([]*model.Carousel, *ec.E) {
+	rows, err := da.Db.Query("select tid,`desc`,picture_url from sp_forum.carousel")
+	if err != nil {
+		return nil, ec.MysqlErr
+	}
+	carousels := make([]*model.Carousel, 0)
+	for rows.Next() {
+		c := &model.Carousel{}
+		if err := rows.Scan(&c.Tid, &c.Title, &c.PictureUrl); err != nil {
+			return nil, ec.MysqlErr
+		}
+		carousels = append(carousels, c)
+	}
+	return carousels, nil
 }
