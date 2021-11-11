@@ -18,14 +18,15 @@ type ThreadService struct{}
 
 func (ts *ThreadService) GetThread(_ *gin.Context, tid, page int) (*model.Thread, *ec.E) {
 	t := &model.Thread{}
-	sqlStr := "select tid,title,`date`,fav,reply_num,last_modify,u.uid,u.username,u.face_url" +
+	sqlStr := "select tid,title,`date`,last_modify,u.uid,u.username,u.face_url" +
 		" from thread t join user u on t.author=u.uid where tid=?"
 	row := da.Db.QueryRow(sqlStr, tid)
-	err := row.Scan(&t.Tid, &t.Title, &t.Date, &t.Fav, &t.ReplyNum, &t.LastModify, &t.Author.Uid, &t.Author.Username, &t.Author.FaceUrl)
+	err := row.Scan(&t.Tid, &t.Title, &t.Date, &t.LastModify, &t.Author.Uid, &t.Author.Username, &t.Author.FaceUrl)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ec.ThreadNotExist
 		}
+		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
 	levels := make([]model.Level, 0)
@@ -39,8 +40,10 @@ func (ts *ThreadService) GetThread(_ *gin.Context, tid, page int) (*model.Thread
 		l := model.Level{}
 		err = rows.Scan(&l.Lid, &l.Content, &l.Date, &l.Fav, &l.IsRoot, &l.ReplyNum, &l.Author.Uid, &l.Author.Username, &l.Author.FaceUrl)
 		if err != nil {
+			log.Printf("exec mysql error:%v", err)
 			return nil, ec.MysqlErr
 		}
+
 		levels = append(levels, l)
 	}
 	t.Levels = levels
@@ -99,15 +102,15 @@ func (ts *ThreadService) GetReply(_ *gin.Context, lid int) ([]*model.Reply, *ec.
 func (ts *ThreadService) CreateLevel(c *gin.Context, tx *sql.Tx, tid int, content string) (*model.Level, *ec.E) {
 	g, _ := c.Get("uid")
 	uid := g.(int)
-	sqlStr := "insert into level(content,`date`,fav,thread,author,is_root) " +
-		"values(?,?,?,?,?,?)"
+	sqlStr := "insert into level(content,`date`,fav,thread,author,is_root,reply_num) " +
+		"values(?,?,?,?,?,?,?)"
 	now := time.Now().Format("2006-01-02 15:04:05")
 	var res sql.Result
 	var err error
 	if tx != nil {
-		res, err = tx.Exec(sqlStr, content, now, 0, tid, uid, true)
+		res, err = tx.Exec(sqlStr, content, now, 0, tid, uid, true, 0)
 	} else {
-		res, err = da.Db.Exec(sqlStr, content, now, 0, tid, uid, false)
+		res, err = da.Db.Exec(sqlStr, content, now, 0, tid, uid, false, 0)
 	}
 	if err != nil {
 		log.Printf("exec mysql error:%v", err)
@@ -128,22 +131,21 @@ func (ts *ThreadService) CreateLevel(c *gin.Context, tx *sql.Tx, tid int, conten
 			Username: author.Username,
 			FaceUrl:  author.FaceUrl,
 		},
-		Replies: nil,
 	}, nil
 }
 
 func (ts *ThreadService) CreateThread(c *gin.Context, title, content string) (*model.Thread, *ec.E) {
 	g, _ := c.Get("uid")
 	uid := g.(int)
-	sqlStr := "insert into thread(title,`date`,fav,reply_num,last_modify,author)" +
-		" values(?,?,?,?,?,?)"
+	sqlStr := "insert into thread(title,`date`,last_modify,author)" +
+		" values(?,?,?,?)"
 	now := time.Now().Format("2006-01-02 15:04:05")
 	tx, err := da.Db.Begin()
 	if err != nil {
 		log.Printf("begin trx error:%v", err)
 		return nil, ec.MysqlErr
 	}
-	res, err := tx.Exec(sqlStr, title, now, 0, 0, now, uid)
+	res, err := tx.Exec(sqlStr, title, now, now, uid)
 	if err != nil {
 		log.Printf("exec mysql error:%v", err)
 		_ = tx.Rollback()
@@ -167,8 +169,6 @@ func (ts *ThreadService) CreateThread(c *gin.Context, title, content string) (*m
 			Tid:        int(tid),
 			Title:      title,
 			Date:       now,
-			Fav:        0,
-			ReplyNum:   1,
 			LastModify: now,
 			Author: model.Author{
 				Uid:      author.Uid,
@@ -183,10 +183,10 @@ func (ts *ThreadService) CreateThread(c *gin.Context, title, content string) (*m
 func (ts *ThreadService) CreateReply(c *gin.Context, lid int, content string, to int) (*model.Reply, *ec.E) {
 	g, _ := c.Get("uid")
 	uid := g.(int)
-	sqlStr := "insert into reply(content,`date`,fav,level,author,to)" +
-		" values(?,?,?,?,?,?)"
+	sqlStr := "insert into reply(content,`date`,level,author,to)" +
+		" values(?,?,?,?,?)"
 	now := time.Now().Format("2006-01-02 15:04:05")
-	res, err := da.Db.Exec(sqlStr, content, now, 0, lid, uid, to)
+	res, err := da.Db.Exec(sqlStr, content, now, lid, uid, to)
 	if err != nil {
 		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
@@ -198,6 +198,15 @@ func (ts *ThreadService) CreateReply(c *gin.Context, lid int, content string, to
 	}
 	toAuthor, err := S().Us.getUserByUid(to)
 	if err != nil {
+		return nil, ec.MysqlErr
+	}
+	_, err = da.Db.Exec("update level set reply_num=reply_num+1 where lid=?", lid)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	if _, err = da.Db.Exec("update thread t join level l on t.tid=l.thread set last_modify=? where l.lid=?", now, lid); err != nil {
+		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
 	return &model.Reply{
@@ -345,6 +354,7 @@ func (ts *ThreadService) IsFav(c *gin.Context, lid int) (bool, *ec.E) {
 	if err != nil {
 		return false, ec.RedisErr
 	}
+	log.Printf("uid:%v,lid:%v,isFav:%v", uid, lid, res)
 	return res, nil
 }
 
@@ -359,7 +369,12 @@ func (ts *ThreadService) Fav(c *gin.Context, tid, lid int, positive bool) *ec.E 
 	if e != nil {
 		return e
 	}
+	log.Printf("tid,lid,positive:%v,%v,%v,%v", tid, lid, positive, isFav)
 	if positive && !isFav {
+		if _, err := da.Db.Exec("update level set fav=fav+1 where lid=?", lid); err != nil {
+			log.Printf("exec mysql error:%v", err)
+			return ec.MysqlErr
+		}
 		_ = conn.Send("multi")
 		_ = conn.Send("set", "user:like:"+strconv.Itoa(uid)+":"+strconv.Itoa(lid), now)
 		_ = conn.Send("zincrby", "thread:liked", 1, tid)
@@ -369,6 +384,10 @@ func (ts *ThreadService) Fav(c *gin.Context, tid, lid int, positive bool) *ec.E 
 			return ec.RedisErr
 		}
 	} else if !positive && isFav {
+		if _, err := da.Db.Exec("update level set fav=fav-1 where lid=?", lid); err != nil {
+			log.Printf("exec mysql error:%v", err)
+			return ec.MysqlErr
+		}
 		favDate, _ := redis.String(conn.Do("get", "user:like:"+strconv.Itoa(uid)+":"+strconv.Itoa(lid)))
 		_, _ = conn.Do("zincrby", "thread:liked", -1, tid)
 		favTime, _ := time.Parse("2006-01-02", favDate)
@@ -385,11 +404,11 @@ func (ts *ThreadService) Fav(c *gin.Context, tid, lid int, positive bool) *ec.E 
 }
 
 func (ts *ThreadService) FavNum(_ *gin.Context, lid int) (int, *ec.E) {
-	conn := da.OpenRedis()
-	defer conn.Close()
-	favNum, err := redis.Int(conn.Do("zscore", "level:liked", lid))
-	if err != nil {
-		return 0, ec.RedisErr
+	row := da.Db.QueryRow("select fav from level where lid=?", lid)
+	var favNum int
+	if err := row.Scan(&favNum); err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return 0, ec.MysqlErr
 	}
 	return favNum, nil
 }
@@ -425,6 +444,19 @@ func (ts *ThreadService) Collect(c *gin.Context, tid int, positive bool) *ec.E {
 		_, err = da.Db.Exec("insert into sp_forum.user_collect(uid,tid) value(?,?)",
 			uid, tid)
 	}
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return ec.MysqlErr
+	}
+	return nil
+}
+
+func (ts *ThreadService) Visit(c *gin.Context, tid int) *ec.E {
+	g, _ := c.Get("uid")
+	uid := g.(int)
+	now := time.Now().Format("2006-01-02 15:04:05")
+	_, err := da.Db.Exec("insert into visit(uid,tid,date) value(?,?,?) on duplicate key update uid=?,tid=?,date=?",
+		uid, tid, now, uid, tid, now)
 	if err != nil {
 		log.Printf("exec mysql error:%v", err)
 		return ec.MysqlErr

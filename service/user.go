@@ -241,21 +241,25 @@ func (us *UserService) Stats(c *gin.Context) (*model.UserStats, *ec.E) {
 	row := da.Db.QueryRow("select reg_date from user where uid=?", uid)
 	var regDate string
 	if err := row.Scan(&regDate); err != nil {
+		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
 	row = da.Db.QueryRow("select count(1) from thread where author=?", uid)
 	var threadNum int
 	if err := row.Scan(&threadNum); err != nil {
+		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
-	row = da.Db.QueryRow("select count(1) from following where uid1=?")
+	row = da.Db.QueryRow("select count(1) from following where uid1=?", uid)
 	var followingNum int
 	if err := row.Scan(&followingNum); err != nil {
+		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
-	row = da.Db.QueryRow("select count(1) from following where uid2=?")
+	row = da.Db.QueryRow("select count(1) from following where uid2=?", uid)
 	var followerNum int
 	if err := row.Scan(&followerNum); err != nil {
+		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
 	return &model.UserStats{
@@ -264,4 +268,118 @@ func (us *UserService) Stats(c *gin.Context) (*model.UserStats, *ec.E) {
 		FollowingNum: followingNum,
 		FollowerNum:  followerNum,
 	}, nil
+}
+
+func (us *UserService) History(c *gin.Context) ([]*model.Post, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	rows, err := da.Db.Query("select tid,date from visit where uid=? order by date desc", uid)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	posts := make([]*model.Post, 0)
+	for rows.Next() {
+		var tid int
+		var date string
+		if err := rows.Scan(&tid, &date); err != nil {
+			continue
+		}
+		p := &model.Post{
+			Author: model.Author{},
+		}
+		row := da.Db.QueryRow("select tid,title,u.uid,u.username,u.face_url from thread t join user u on t.author=u.uid where tid=?", tid)
+		if err = row.Scan(&p.Tid, &p.Title, &p.Author.Uid, &p.Author.Username, &p.Author.FaceUrl); err == nil {
+			if e := PostDetail(p); e == nil {
+				p.LastModify = date
+				posts = append(posts, p)
+			}
+		}
+	}
+	return posts, nil
+}
+
+func (us *UserService) Posts(c *gin.Context) ([]*model.Post, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	rows, err := da.Db.Query("select tid,title,last_modify,u.uid,u.username,u.face_url from thread t join user u on t.author=u.uid where u.uid=?", uid)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	posts := make([]*model.Post, 0)
+	for rows.Next() {
+		p := &model.Post{
+			Author: model.Author{},
+		}
+		if err := rows.Scan(&p.Tid, &p.Title, &p.LastModify, &p.Author.Uid, &p.Author.Username, &p.Author.FaceUrl); err == nil {
+			if e := PostDetail(p); e == nil {
+				posts = append(posts, p)
+			}
+		}
+	}
+	return posts, nil
+}
+
+func (us *UserService) Collection(c *gin.Context) ([]*model.Post, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	rows, err := da.Db.Query("select tid from user_collect where uid=?", uid)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	posts := make([]*model.Post, 0)
+	for rows.Next() {
+		var tid int
+		if err := rows.Scan(&tid); err != nil {
+			continue
+		}
+		p := &model.Post{
+			Author: model.Author{},
+		}
+		row := da.Db.QueryRow("select tid,title,last_modify,u.uid,u.username,u.face_url from thread t join user u on t.author=u.uid where tid=?", tid)
+		if err = row.Scan(&p.Tid, &p.Title, &p.LastModify, &p.Author.Uid, &p.Author.Username, &p.Author.FaceUrl); err == nil {
+			if e := PostDetail(p); e == nil {
+				posts = append(posts, p)
+			}
+		}
+	}
+	return posts, nil
+}
+
+func (us *UserService) Following(c *gin.Context) ([]*model.User, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	rows, err := da.Db.Query("select u.uid,u.username,u.`desc`,u.face_url from following join user u on uid2=u.uid where uid1=?", uid)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	users := make([]*model.User, 0)
+	for rows.Next() {
+		u := &model.User{}
+		if err := rows.Scan(&u.Uid, &u.Username, &u.Desc, &u.FaceUrl); err == nil {
+			users = append(users, u)
+		}
+	}
+	return users, nil
+}
+
+func (us *UserService) Follower(c *gin.Context) ([]*model.User, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	rows, err := da.Db.Query("select u.uid,u.username,u.`desc`,u.face_url from following join user u on uid1=u.uid where uid2=?", uid)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	users := make([]*model.User, 0)
+	for rows.Next() {
+		u := &model.User{}
+		if err := rows.Scan(&u.Uid, &u.Username, &u.Desc, &u.FaceUrl); err == nil {
+			users = append(users, u)
+		}
+	}
+	return users, nil
 }

@@ -18,10 +18,10 @@ type UserDetail struct {
 }
 
 type UserStats struct {
-	RegDate      string `json:"reg_date,omitempty"`
-	ThreadNum    int    `json:"thread_num,omitempty"`
-	FollowingNum int    `json:"following_num,omitempty"`
-	FollowerNum  int    `json:"follower_num,omitempty"`
+	RegDate      string `json:"reg_date"`
+	ThreadNum    int    `json:"thread_num"`
+	FollowingNum int    `json:"following_num"`
+	FollowerNum  int    `json:"follower_num"`
 }
 
 type Author struct {
@@ -30,26 +30,28 @@ type Author struct {
 	FaceUrl  string `json:"face_url"`
 }
 
+type User struct {
+	Author
+	Desc string `json:"desc"`
+}
+
 type Thread struct {
 	Tid        int     `json:"tid,omitempty"`
 	Title      string  `json:"title,omitempty"`
 	Date       string  `json:"date,omitempty"`
-	Fav        int     `json:"fav,omitempty"`
-	ReplyNum   int     `json:"reply_num,omitempty"`
 	LastModify string  `json:"last_modify,omitempty"`
 	Author     Author  `json:"author"`
 	Levels     []Level `json:"levels"`
 }
 
 type Level struct {
-	Lid      int     `json:"lid,omitempty"`
-	Content  string  `json:"content,omitempty"`
-	Date     string  `json:"date,omitempty"`
-	Fav      int     `json:"fav,omitempty"`
-	IsRoot   bool    `json:"is_root,omitempty"`
-	ReplyNum int     `json:"reply_num,omitempty"`
-	Author   Author  `json:"author"`
-	Replies  []Reply `json:"replies"`
+	Lid      int    `json:"lid,omitempty"`
+	Content  string `json:"content,omitempty"`
+	Date     string `json:"date,omitempty"`
+	Fav      int    `json:"fav,omitempty"`
+	IsRoot   bool   `json:"is_root,omitempty"`
+	ReplyNum int    `json:"reply_num,omitempty"`
+	Author   Author `json:"author"`
 }
 
 type Reply struct {
@@ -70,4 +72,14 @@ type Carousel struct {
 	Tid        int    `json:"tid,omitempty"`
 	Title      string `json:"title,omitempty"`
 	PictureUrl string `json:"picture_url,omitempty"`
+}
+
+type Post struct {
+	Tid        int    `json:"tid,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Abstract   string `json:"abstract,omitempty"`
+	Author     Author `json:"author"`
+	ReplyNum   int    `json:"reply_num,omitempty"`
+	VisitNum   int    `json:"visit_num,omitempty"`
+	LastModify string `json:"last_modify,omitempty"`
 }

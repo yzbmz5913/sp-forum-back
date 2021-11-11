@@ -21,7 +21,7 @@ var (
 func main() {
 	r := gin.Default()
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:7999")
+		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "*")
 		c.Header("Access-Control-Expose-Headers", "Authorization")
@@ -124,6 +124,47 @@ func main() {
 			c.JSON(200, &ec.RSP{Payload: stats})
 		}
 	})
+	r.GET("/user/history", auth, func(c *gin.Context) {
+		posts, e := s.Us.History(c)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: posts})
+		}
+	})
+	r.GET("/user/posts", auth, func(c *gin.Context) {
+		posts, e := s.Us.Posts(c)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: posts})
+		}
+	})
+	r.GET("/user/collection", auth, func(c *gin.Context) {
+		posts, e := s.Us.Collection(c)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: posts})
+		}
+	})
+	r.GET("/user/following", auth, func(c *gin.Context) {
+		posts, e := s.Us.Following(c)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: posts})
+		}
+	})
+	r.GET("/user/follower", auth, func(c *gin.Context) {
+		posts, e := s.Us.Follower(c)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: posts})
+		}
+	})
+
 	r.GET("/thread/getThread", func(c *gin.Context) {
 		t := c.Query("tid")
 		p := c.Query("page")
@@ -156,7 +197,7 @@ func main() {
 			c.JSON(200, &ec.RSP{Payload: replies})
 		}
 	})
-	r.POST("/thread/createThread", func(c *gin.Context) {
+	r.POST("/thread/createThread", auth, func(c *gin.Context) {
 		title := c.PostForm("title")
 		content := c.PostForm("content")
 		thread, e := s.Ts.CreateThread(c, title, content)
@@ -166,7 +207,7 @@ func main() {
 			c.JSON(200, &ec.RSP{Payload: thread})
 		}
 	})
-	r.POST("/thread/createLevel", func(c *gin.Context) {
+	r.POST("/thread/createLevel", auth, func(c *gin.Context) {
 		t := c.PostForm("tid")
 		tid, _ := strconv.Atoi(t)
 		content := c.PostForm("content")
@@ -177,7 +218,7 @@ func main() {
 			c.JSON(200, &ec.RSP{Payload: level})
 		}
 	})
-	r.POST("/thread/createReply", func(c *gin.Context) {
+	r.POST("/thread/createReply", auth, func(c *gin.Context) {
 		l := c.PostForm("lid")
 		lid, _ := strconv.Atoi(l)
 		content := c.PostForm("content")
@@ -221,7 +262,7 @@ func main() {
 		}
 	})
 	r.GET("/thread/isFav", auth, func(c *gin.Context) {
-		l := c.PostForm("lid")
+		l := c.Query("lid")
 		lid, _ := strconv.Atoi(l)
 		isFav, e := s.Ts.IsFav(c, lid)
 		if e != nil {
@@ -245,7 +286,7 @@ func main() {
 		}
 	})
 	r.GET("/thread/favNum", func(c *gin.Context) {
-		l := c.PostForm("lid")
+		l := c.Query("lid")
 		lid, _ := strconv.Atoi(l)
 		favNum, e := s.Ts.FavNum(c, lid)
 		if e != nil {
@@ -255,7 +296,7 @@ func main() {
 		}
 	})
 	r.GET("/thread/isCollect", auth, func(c *gin.Context) {
-		t := c.PostForm("tid")
+		t := c.Query("tid")
 		tid, _ := strconv.Atoi(t)
 		isCollect, e := s.Ts.IsCollect(c, tid)
 		if e != nil {
@@ -269,6 +310,16 @@ func main() {
 		tid, _ := strconv.Atoi(t)
 		p := c.PostForm("positive")
 		e := s.Ts.Collect(c, tid, p == "true")
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.OK)
+		}
+	})
+	r.POST("/thread/visit", auth, func(c *gin.Context) {
+		t := c.PostForm("tid")
+		tid, _ := strconv.Atoi(t)
+		e := s.Ts.Visit(c, tid)
 		if e != nil {
 			c.JSON(200, &e)
 		} else {
@@ -290,6 +341,16 @@ func main() {
 			c.JSON(200, &e)
 		} else {
 			c.JSON(200, &ec.RSP{Payload: carousel})
+		}
+	})
+	r.GET("/home/posts", func(c *gin.Context) {
+		p := c.Query("page")
+		page, _ := strconv.Atoi(p)
+		posts, e := s.Hs.Posts(c, page)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: posts})
 		}
 	})
 
