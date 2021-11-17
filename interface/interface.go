@@ -164,6 +164,14 @@ func main() {
 			c.JSON(200, &ec.RSP{Payload: posts})
 		}
 	})
+	r.GET("/user/notifications", auth, func(c *gin.Context) {
+		nts, e := s.Us.Notifications(c)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: nts})
+		}
+	})
 
 	r.GET("/thread/getThread", func(c *gin.Context) {
 		t := c.Query("tid")
@@ -351,6 +359,15 @@ func main() {
 			c.JSON(200, &e)
 		} else {
 			c.JSON(200, &ec.RSP{Payload: posts})
+		}
+	})
+	r.GET("/home/search", func(c *gin.Context) {
+		k := c.Query("keyword")
+		search, e := s.Hs.Search(c, k)
+		if e != nil {
+			c.JSON(200, &e)
+		} else {
+			c.JSON(200, &ec.RSP{Payload: search})
 		}
 	})
 

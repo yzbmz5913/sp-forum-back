@@ -383,3 +383,32 @@ func (us *UserService) Follower(c *gin.Context) ([]*model.User, *ec.E) {
 	}
 	return users, nil
 }
+
+func (us *UserService) Notifications(c *gin.Context) ([]*model.Notification, *ec.E) {
+	get, _ := c.Get("uid")
+	uid := get.(int)
+	nts := make([]*model.Notification, 0)
+	rows, err := da.Db.Query("select u.uid,u.username,u.face_url,type,`date`,thread,content from notification join user u using(uid) where uid=?", uid)
+	if err != nil {
+		log.Printf("query mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	for rows.Next() {
+		nt := &model.Notification{From: model.Author{}}
+		if err := rows.Scan(&nt.From.Uid, &nt.From.Username, &nt.From.FaceUrl, &nt.Type, &nt.Date, &nt.Tid, &nt.Content); err != nil {
+			log.Printf("scan mysql error:%v", err)
+			continue
+		}
+		if nt.Type == 2 || nt.Type == 3 {
+			row := da.Db.QueryRow("select title from thread where tid=?", nt.Tid)
+			var title string
+			if err := row.Scan(&title); err != nil {
+				log.Printf("scan mysql error:%v", err)
+				continue
+			}
+			nt.Title = title
+		}
+		nts = append(nts, nt)
+	}
+	return nts, nil
+}

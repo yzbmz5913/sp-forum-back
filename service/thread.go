@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
@@ -10,6 +11,7 @@ import (
 	"sp-forum-back/da"
 	"sp-forum-back/model"
 	ec "sp-forum-back/model"
+	"sp-forum-back/utils"
 	"strconv"
 	"time"
 )
@@ -165,6 +167,17 @@ func (ts *ThreadService) CreateThread(c *gin.Context, title, content string) (*m
 			log.Printf("commit trx error:%v", err)
 			return nil, ec.MysqlErr
 		}
+		go utils.Retry(3, 3*time.Second, func() error {
+			_, err := da.Es.Index().
+				Index(model.EsIndexName).
+				Id(strconv.Itoa(int(tid))).
+				BodyJson(&model.EsPost{
+					Title:   title,
+					Author:  author.Username,
+					Content: content,
+				}).Do(context.Background())
+			return err
+		})
 		return &model.Thread{
 			Tid:        int(tid),
 			Title:      title,
@@ -205,9 +218,20 @@ func (ts *ThreadService) CreateReply(c *gin.Context, lid int, content string, to
 		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
 	}
-	if _, err = da.Db.Exec("update thread t join level l on t.tid=l.thread set last_modify=? where l.lid=?", now, lid); err != nil {
+	row := da.Db.QueryRow("select thread from level where lid=?", lid)
+	var tid int
+	if err := row.Scan(&tid); err != nil {
 		log.Printf("exec mysql error:%v", err)
 		return nil, ec.MysqlErr
+	}
+	if _, err = da.Db.Exec("update thread t set last_modify=? where tid=?", now, tid); err != nil {
+		log.Printf("exec mysql error:%v", err)
+		return nil, ec.MysqlErr
+	}
+	_, err = da.Db.Exec("insert into notification value(?,?,?,?,?,?)",
+		to, uid, 3, now, tid, content)
+	if err != nil {
+		log.Printf("exec mysql error:%v", err)
 	}
 	return &model.Reply{
 		Rid:     int(rid),
@@ -342,6 +366,10 @@ func (ts *ThreadService) DelThread(c *gin.Context, tid int) *ec.E {
 		log.Printf("commit trx error:%v", err)
 		return ec.MysqlErr
 	}
+	go utils.Retry(3, 3*time.Second, func() error {
+		_, err := da.Es.Delete().Index(model.EsIndexName).Id(strconv.Itoa(tid)).Do(context.Background())
+		return err
+	})
 	return nil
 }
 
@@ -383,6 +411,16 @@ func (ts *ThreadService) Fav(c *gin.Context, tid, lid int, positive bool) *ec.E 
 			log.Printf("redis trx error:%v", err)
 			return ec.RedisErr
 		}
+		go func() {
+			row := da.Db.QueryRow("select author from level where lid=?", lid)
+			var to int
+			if err := row.Scan(&to); err != nil {
+				log.Printf("exec mysql error:%v", err)
+				return
+			}
+			da.Db.Exec("insert into notification value(?,?,?,?,?,?)",
+				to, uid, 2, now, tid, "")
+		}()
 	} else if !positive && isFav {
 		if _, err := da.Db.Exec("update level set fav=fav-1 where lid=?", lid); err != nil {
 			log.Printf("exec mysql error:%v", err)

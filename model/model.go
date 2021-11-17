@@ -83,3 +83,20 @@ type Post struct {
 	VisitNum   int    `json:"visit_num,omitempty"`
 	LastModify string `json:"last_modify,omitempty"`
 }
+
+type Notification struct {
+	Type    int    `json:"type,omitempty"`
+	From    Author `json:"from"`
+	Date    string `json:"date,omitempty"`
+	Content string `json:"content,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Tid     int    `json:"tid,omitempty"`
+}
+
+const EsIndexName = "sp_forum_posts"
+
+type EsPost struct {
+	Title   string `json:"title,omitempty"`
+	Author  string `json:"author,omitempty"`
+	Content string `json:"content,omitempty"`
+}

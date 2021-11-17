@@ -13,6 +13,7 @@ var OK = &E{0000, "OK"}
 var MysqlErr = &E{0001, "数据库错误"}
 var ParamsErr = &E{0002, "参数错误"}
 var RedisErr = &E{1003, "获取缓存错误"}
+var EsErr = &E{1004, "搜索引擎错误"}
 
 var UsernameExist = &E{1001, "用户名已被注册"}
 var PwdInvalid = &E{1002, "密码必须是8~18位的字母与数字组合"}

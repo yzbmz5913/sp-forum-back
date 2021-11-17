@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"github.com/garyburd/redigo/redis"
 	"github.com/gin-gonic/gin"
+	es "github.com/olivere/elastic"
 	"log"
 	"sp-forum-back/da"
 	"sp-forum-back/model"
@@ -125,4 +127,28 @@ func PostDetail(p *model.Post) *ec.E {
 		return ec.MysqlErr
 	}
 	return nil
+}
+
+func (hs *HomeService) Search(c *gin.Context, keyword string) ([]*model.Post, *ec.E) {
+	posts := make([]*model.Post, 0)
+	bq := es.NewBoolQuery()
+	bq.Should(es.NewMatchQuery("title", keyword),
+		es.NewMatchQuery("content", keyword),
+		es.NewMatchQuery("author", keyword))
+	res, err := da.Es.Search(model.EsIndexName).Query(bq).Do(context.Background())
+	if err != nil {
+		log.Printf("query es error:%v", err)
+		return nil, ec.EsErr
+	}
+	for _, hit := range res.Hits.Hits {
+		id, _ := strconv.Atoi(hit.Id)
+		p := &model.Post{Author: ec.Author{}}
+		rows := da.Db.QueryRow("select tid,title,last_modify,u.uid,u.username,u.face_url from thread join user u on u.uid=author where tid=?", id)
+		if err := rows.Scan(&p.Tid, &p.Title, &p.LastModify, &p.Author.Uid, &p.Author.Username, &p.Author.FaceUrl); err == nil {
+			if e := PostDetail(p); e == nil {
+				posts = append(posts, p)
+			}
+		}
+	}
+	return posts, nil
 }
